@@ -472,6 +472,7 @@ header.site nav a:hover{color:var(--gold)}
 .btn.ghost.dark{color:var(--ink)!important;border-color:var(--ink)}
 .btn.ghost.dark:hover{background:var(--ink);color:#fff!important;border-color:var(--ink)}
 .btn.big{font-size:17px;padding:14px 30px}
+.btn.big + .small{margin-top:12px}
 .ctarow{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:22px 0 0}
 
 /* ---------- hero ---------- */
