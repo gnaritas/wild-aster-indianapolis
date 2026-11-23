@@ -2,3 +2,4 @@ node_modules/
 .railway/
 *.log
 shots/
+send-envelope.json

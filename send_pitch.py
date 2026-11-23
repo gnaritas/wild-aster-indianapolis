@@ -85,16 +85,33 @@ print('recipient-local now:', local_now.strftime('%Y-%m-%d %H:%M %Z'))
 if not (7 <= local_now.hour < 17):
     sys.exit(f'ABORT WINDOW: {local_now.strftime("%H:%M")} local outside 07:00-17:00 — park, never night-send')
 
+# 4c) envelope-reuse guard (session-house-boston 2026-11-23): if a crashed earlier attempt
+# already sent, send-envelope.json carries ok=true — reuse its mid, NEVER re-send, fall through
+# to read-back + registry append.
+prev_env = None
+if os.path.exists(ENVOUT):
+    try:
+        pe = json.load(open(ENVOUT))
+        pd = (pe.get('env') or {}).get('data') or {}
+        if pe.get('ok') and (pd.get('message_id') or pd.get('msg_id')):
+            prev_env = pe.get('env')
+            print('RESUME-SEND: envelope ok=true on disk — reusing msg id, NOT re-sending')
+    except Exception:
+        pass
+
 # 5) send (body on stdin, --json envelope; message_id from the envelope JSON)
-res = subprocess.run(['email', 'send', '--account', 'jarvis', '--as', 'websites',
-                      '--to', TO, '--subject', SUBJ, '--json'],
-                     input=body.encode(), capture_output=True, timeout=120)
-try:
-    env = json.loads(res.stdout.decode())
-except Exception:
-    open(ENVOUT, 'w').write(res.stdout.decode() + '\n---STDERR---\n' + res.stderr.decode())
-    sys.exit('ABORT: unparseable send envelope — do NOT resend, read back Sent Mail first')
-json.dump({'ok': env.get('ok'), 'env': env}, open(ENVOUT, 'w'))
+if prev_env is None:
+    res = subprocess.run(['email', 'send', '--account', 'jarvis', '--as', 'websites',
+                          '--to', TO, '--subject', SUBJ, '--json'],
+                         input=body.encode(), capture_output=True, timeout=120)
+    try:
+        env = json.loads(res.stdout.decode())
+    except Exception:
+        open(ENVOUT, 'w').write(res.stdout.decode() + '\n---STDERR---\n' + res.stderr.decode())
+        sys.exit('ABORT: unparseable send envelope — do NOT resend, read back Sent Mail first')
+    json.dump({'ok': env.get('ok'), 'env': env}, open(ENVOUT, 'w'))
+else:
+    env = prev_env
 ok = env.get('ok')
 mid = (env.get('data') or {}).get('message_id') or (env.get('data') or {}).get('msg_id')
 print('SEND ok=', ok, 'msg:', mid if ok else env)
@@ -151,7 +168,7 @@ for i, l in enumerate(open(REG), 1):
     except Exception: continue
     if d.get('type') == 'pitch':
         pitches += 1
-        if d.get('slug') == SLUG: mine += 1; line_no = pitches
+        if d.get('slug') == SLUG: mine += 1; line_no = i  # physical registry line (events.line PK), not pitch ordinal — sokoya 2026-11-23 pitfall
 assert mine == 1, f'wild-aster pitch rows={mine}'
 print(f'REGISTRY_OK total_pitch_rows={pitches} mine=1 line={line_no}')
 
