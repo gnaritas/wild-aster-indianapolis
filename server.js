@@ -1,0 +1,115 @@
+/* Wild Aster Boutique — static server + contact-form delivery to the lane inbox (template v2, 2026-11-22, t_f44ac4fb)
+   Relay code copied from the proven copa-cafe/threemonkeys server.js (Brevo HTTP API over 443, htmlContent/textContent keys). */
+const http = require("http"), fs = require("fs"), path = require("path");
+
+const SITE = "Wild Aster Boutique";
+const PORT = process.env.PORT || 3000;
+const root = path.join(__dirname, "public");
+const BREVO_API = "https://api.brevo.com/v3/smtp/email";
+const MAIL = {
+  key: process.env.BREVO_API_KEY || "",
+  alias: process.env.MAIL_ALIAS || "jarvis+websites@onsmalltalk.com",
+  to: process.env.MAIL_TO || "jarvis+websites@onsmalltalk.com",
+};
+const MAIL_READY = !!MAIL.key;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml", ".ico": "image/x-icon", ".gif": "image/gif", ".xml": "application/xml", ".txt": "text/plain",
+};
+
+const NOINDEX = { "x-robots-tag": "noindex, nofollow" }; // demo-host doctrine
+
+function readBody(req, cb) {
+  let data = "", len = 0;
+  req.on("data", (c) => { len += c.length; if (len > 20000) { req.destroy(); return; } data += c; });
+  req.on("end", () => cb(data));
+}
+
+function out(file, body, res) {
+  const ext = path.extname(file).toLowerCase();
+  const cache = ext === ".png" || ext === ".jpg" || ext === ".jpeg" ? "public, max-age=86400"
+    : ext === ".css" || ext === ".svg" ? "public, max-age=300" : "public, max-age=60";
+  res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": cache, ...NOINDEX });
+  res.end(body);
+}
+
+function serve404(res) {
+  fs.readFile(path.join(root, "404.html"), (e, d) => {
+    res.writeHead(404, { "content-type": "text/html; charset=utf-8", ...NOINDEX });
+    res.end(e ? "<h1>404 — not found</h1>" : d.toString());
+  });
+}
+
+function serveStatic(p, res) {
+  if (p === "/") p = "/index.html";
+  const f = path.normalize(path.join(root, p));
+  if (!f.startsWith(root)) { res.writeHead(403); return res.end("no"); }
+  fs.readFile(f, (e, d) => {
+    if (e && !path.extname(f)) {
+      const alt = f + ".html";
+      return fs.readFile(alt, (e2, d2) => e2 ? serve404(res) : out(alt, d2, res));
+    }
+    if (e) return serve404(res);
+    out(f, d, res);
+  });
+}
+
+http.createServer((req, res) => {
+  let p = decodeURIComponent(req.url.split("?")[0]).replace(/\/$/, "");
+  if (p === "") p = "/";
+  if (p === "/open" && (req.method === "GET" || req.method === "HEAD")) {
+    const q = new URLSearchParams(req.url.split("?")[1] || "");
+    console.log("OPEN " + SITE + " " + JSON.stringify({ t: (q.get("t") || "").slice(0, 120), ua: (req.headers["user-agent"] || "").slice(0, 60), ts: new Date().toISOString() }));
+    return fs.readFile(path.join(root, "pixel.gif"), (e, d) => {
+      res.writeHead(e ? 404 : 200, { "content-type": "image/gif", "cache-control": "no-store", ...NOINDEX });
+      res.end(e ? "" : d);
+    });
+  }
+  if (req.url.indexOf("utm_") !== -1) {
+    const q = new URLSearchParams(req.url.split("?")[1] || "");
+    console.log("CLICK " + SITE + " " + JSON.stringify({ c: (q.get("utm_content") || "").slice(0, 120), path: p.slice(0, 100), ua: (req.headers["user-agent"] || "").slice(0, 60), ts: new Date().toISOString() }));
+  }
+  if (p === "/healthz") { res.writeHead(200, { "content-type": "text/plain", ...NOINDEX }); return res.end("ok"); }
+  if (req.method === "POST" && p === "/contact") {
+    if ((req.headers["content-type"] || "").split(";")[0] !== "application/x-www-form-urlencoded") {
+      res.writeHead(415, { "content-type": "text/plain", ...NOINDEX }); return res.end("expected a plain form post");
+    }
+    return readBody(req, (raw) => {
+      const F = Object.fromEntries(new URLSearchParams(raw));
+      const name = (F.name || "").slice(0, 120), phone = (F.phone || "").slice(0, 60),
+            email = (F.email || "").slice(0, 120), message = (F.message || "").slice(0, 4000);
+      if (!name.trim() || !message.trim()) {
+        res.writeHead(400, { "content-type": "text/plain", ...NOINDEX }); return res.end("name and message are required");
+      }
+      console.log("CONTACT " + SITE + " " + JSON.stringify({ name, phone, email, message, t: new Date().toISOString() }));
+      if (!MAIL_READY) { res.writeHead(503, { "content-type": "text/plain", ...NOINDEX }); return res.end("form mailbox not configured yet"); }
+      const payload = {
+        sender: { name: SITE, email: MAIL.alias },
+        to: [{ email: MAIL.to }],
+        subject: `[${SITE}] website contact from ${name}`,
+        textContent: `Name: ${name}\nPhone: ${phone || "-"}\nEmail: ${email || "-"}\n\n${message}\n\n— sent via the ${SITE} site, ${new Date().toISOString()}`,
+      };
+      if (/^[^@\s]+@[^@\s]+$/.test(email)) payload.replyTo = { email };
+      fetch(BREVO_API, {
+        method: "POST",
+        headers: { "api-key": MAIL.key, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((r) => {
+        if (!r.ok) return r.text().then((t) => { throw new Error(`relay HTTP ${r.status}: ${t.slice(0, 200)}`); });
+        return r.json();
+      }).then((j) => {
+        console.log("MAILSENT " + SITE + " " + (j && j.messageId ? j.messageId : "accepted"));
+        res.writeHead(303, { location: "/thanks", ...NOINDEX }); res.end();
+      }).catch((err) => {
+        console.log("MAILERR " + SITE + " " + err.message);
+        res.writeHead(502, { "content-type": "text/html; charset=utf-8", ...NOINDEX });
+        res.end("<h1>Couldn&rsquo;t send just now</h1><p>Your note reached the shop&rsquo;s log &mdash; please try again in a moment.</p>");
+      });
+    });
+  }
+  if (req.method === "GET" || req.method === "HEAD") return serveStatic(p, res);
+  res.writeHead(405, { "content-type": "text/plain", ...NOINDEX });
+  res.end("method not allowed");
+}).listen(PORT, () => console.log(SITE + " site on :" + PORT));

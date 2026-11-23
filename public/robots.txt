@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /thanks
+Disallow: /404
+
+Sitemap: https://wild-aster-indianapolis-demo.up.railway.app/sitemap.xml

@@ -1,0 +1,12 @@
+{
+  "name": "wild-aster-indianapolis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Wild Aster Boutique — Irvington, Indianapolis size-inclusive boutique (websites desk, t_f44ac4fb)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
